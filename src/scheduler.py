@@ -102,6 +102,18 @@ class Scheduler(Service):
         self._verbose = args.verbose
         self._output = args.output
         self._imgprefix = args.image_prefix or ''
+        self._promisc = bool(getattr(args, 'promisc', False))
+        self._event_filters = {}
+        event_owner = getattr(args, 'event_owner', None)
+        if event_owner:
+            self._event_filters['owner'] = event_owner
+        event_submitter = getattr(args, 'event_submitter', None)
+        if event_submitter:
+            self._event_filters['submitter'] = event_submitter
+        self.log.info(
+            "Subscription setup: "
+            f"promisc={self._promisc}, node_filters={self._event_filters or 'none'}"
+        )
         self._raw_yaml = configs.get('_raw_yaml', {})
         self._build_configs = configs.get('build_configs', {})
         if not os.path.exists(self._output):
@@ -266,9 +278,16 @@ class Scheduler(Service):
         # ToDo: if stat != 0 then report error to API?
 
     def _setup(self, args):
-        node_sub_id = self._api.subscribe('node')
+        node_sub_id = self._api_helper.subscribe_filters(
+            self._event_filters or None,
+            channel='node',
+            promiscuous=self._promisc
+        )
         self.log.debug(f"Node channel sub id: {node_sub_id}")
-        retry_sub_id = self._api.subscribe('retry')
+        retry_sub_id = self._api_helper.subscribe_filters(
+            channel='retry',
+            promiscuous=self._promisc
+        )
         self.log.debug(f"Retry channel sub id: {retry_sub_id}")
         self._context = {"node": node_sub_id, "retry": retry_sub_id}
         return {"node": node_sub_id, "retry": retry_sub_id}
@@ -869,7 +888,12 @@ class Scheduler(Service):
                         break
                 self.log.error(f"Error receiving event: {e}")
                 self.log.debug(f"Re-subscribing to channel: {channel}")
-                sub_id = self._api.subscribe(channel)
+                channel_filters = self._event_filters if channel == 'node' else None
+                sub_id = self._api_helper.subscribe_filters(
+                    channel_filters,
+                    channel=channel,
+                    promiscuous=self._promisc
+                )
                 with self._context_lock:
                     self._context[channel] = sub_id
                 subscribe_retries += 1
@@ -878,6 +902,8 @@ class Scheduler(Service):
                     return False
                 continue
             subscribe_retries = 0
+            if channel == 'node' and not self._api_helper.pubsub_event_filter(sub_id, event):
+                continue
             for job, runtime, platform, rules in self._sched.get_schedule(event):
                 input_node = self._api.node.get(event['id'])
                 jobfilter = event.get('jobfilter')
@@ -924,6 +950,19 @@ class cmd_loop(Command):
             'name': '--name',
             'help': "Service name used to create log file",
             'required': True
+        },
+        {
+            'name': '--promisc',
+            'action': 'store_true',
+            'help': "Subscribe in promiscuous mode to receive all users' events",
+        },
+        {
+            'name': '--event-owner',
+            'help': "Optional top-level event owner filter (e.g. production)",
+        },
+        {
+            'name': '--event-submitter',
+            'help': "Optional top-level event submitter filter (e.g. service:pipeline)",
         },
     ]
 
