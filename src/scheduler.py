@@ -990,6 +990,11 @@ class cmd_loop(Command):
             'action': 'store_true',
             'help': "Do not skip jobs when no online devices are reported by LAVA",
         },
+        {
+            'name': '--disable-watchdog',
+            'action': 'store_true',
+            'help': "Disable watchdog thread that force-exits on stuck scheduler threads",
+        },
     ]
 
     def __call__(self, configs, args):
@@ -998,8 +1003,11 @@ class cmd_loop(Command):
         # Start health server
         health_thread = scheduler.start_health_server()
 
-        # Start watchdog to monitor scheduler threads
-        watchdog_thread = scheduler.start_watchdog()
+        # Start watchdog to monitor scheduler threads unless explicitly disabled
+        if getattr(args, 'disable_watchdog', False):
+            scheduler.log.info("Watchdog disabled by --disable-watchdog")
+        else:
+            watchdog_thread = scheduler.start_watchdog()
 
         return scheduler.run()
 
