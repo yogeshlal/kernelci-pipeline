@@ -103,6 +103,9 @@ class Scheduler(Service):
         self._output = args.output
         self._imgprefix = args.image_prefix or ''
         self._promisc = bool(getattr(args, 'promisc', False))
+        self._disable_device_health_check = bool(
+            getattr(args, 'disable_device_health_check', False)
+        )
         self._event_filters = {}
         event_owner = getattr(args, 'event_owner', None)
         if event_owner:
@@ -113,6 +116,10 @@ class Scheduler(Service):
         self.log.info(
             "Subscription setup: "
             f"promisc={self._promisc}, node_filters={self._event_filters or 'none'}"
+        )
+        self.log.info(
+            "Device health check: "
+            f"{'disabled' if self._disable_device_health_check else 'enabled'}"
         )
         self._raw_yaml = configs.get('_raw_yaml', {})
         self._build_configs = configs.get('build_configs', {})
@@ -431,12 +438,26 @@ class Scheduler(Service):
                 device_type, online_only=True
             )
             if not device_names:
+                if self._disable_device_health_check:
+                    self.log.info(
+                        f"Proceeding with job {job_config.name} for {runtime.config.name}: "
+                        f"device_type={device_type} has no online devices "
+                        f"(check disabled)"
+                    )
+                    self._telemetry.emit(
+                        'runtime_warning',
+                        runtime=runtime.config.name,
+                        device_type=device_type,
+                        job_name=job_config.name,
+                        error_type='no_online_devices',
+                        error_msg=f'device_type={device_type} '
+                                  f'has no online devices',
+                    )
+                    return False
                 self.log.info(
                     f"Skipping job {job_config.name} for {runtime.config.name}: "
                     f"device_type={device_type} has no online devices"
                 )
-                return True  # Skip submission when no online devices
-
                 self._telemetry.emit(
                     'job_skip',
                     runtime=runtime.config.name,
@@ -446,7 +467,7 @@ class Scheduler(Service):
                     error_msg=f'device_type={device_type} '
                               f'has no online devices',
                 )
-                return True  # Skip submission when no online devices
+                return True
 
             online_device_count = len(device_names)
 
@@ -963,6 +984,11 @@ class cmd_loop(Command):
         {
             'name': '--event-submitter',
             'help': "Optional top-level event submitter filter (e.g. service:pipeline)",
+        },
+        {
+            'name': '--disable-device-health-check',
+            'action': 'store_true',
+            'help': "Do not skip jobs when no online devices are reported by LAVA",
         },
     ]
 
