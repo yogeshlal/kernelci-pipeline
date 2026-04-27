@@ -25,8 +25,8 @@ jobs:
       - name: Check for updates
         id: check
         run: |
-          python tools/sync_stable_branches.py --dry-run 2>&1 | tee output.txt
-          if grep -q "Config is already up to date" output.txt; then
+          python tools/sync_stable_branches.py --dry-run 2>&1 | tee "$RUNNER_TEMP/sync-output.txt"
+          if grep -q "Config is already up to date" "$RUNNER_TEMP/sync-output.txt"; then
             echo "needs_update=false" >> $GITHUB_OUTPUT
           else
             echo "needs_update=true" >> $GITHUB_OUTPUT
